@@ -80,24 +80,20 @@ When analyzing a run and generating recommendations, Claude should:
 - [x] Read `python-garminconnect` docs and run demo.py
 - [x] Identify exact Garmin fields to pull
 - [x] Get Anthropic API key and test a basic Claude call
-- [ ] Research OpenWeatherMap API
-- [ ] Research OpenTopoData API
 
 ### Phase 2 — Core Data Loop (MVP)
 - [x] Script to log into Garmin and pull last run stats
 - [x] Design post-run check-in (harder / easier / same + optional text)
-- [ ] Build Claude prompt with run data + check-in
-- [ ] Get Claude returning a plain-text next-run recommendation
-- [ ] Test end-to-end on a real run
+- [x] Build Claude prompt with run data + check-in
+- [x] Get Claude returning a plain-text next-run recommendation
+- [x] Test end-to-end on a real run
 
 ### Phase 3 — Intelligence Layer
-- [ ] Add weather context to Claude prompt
-- [ ] Add terrain/hill awareness by location
-- [ ] Implement Beli-style comparison (last 3–5 runs)
+- [x] Add weather context to Claude prompt
+- [x] Implement Beli-style comparison (last 3–5 runs)
 - [ ] Fitness progression logic (safe weekly load increase)
-- [ ] 80/20 rule awareness
-- [ ] Shoe mileage tracking
-- [ ] Rest day recommendations
+- [x] 80/20 rule awareness
+- [x] Rest day recommendations
 
 ### Phase 4 — Progress Visualization
 - [ ] Decide key metrics to visualize

@@ -37,6 +37,8 @@ def get_last_run():
     run = {
         # Core
         "date": last_run.get("startTimeLocal"),
+        "start_lat": last_run.get("startLatitude"),
+        "start_lon": last_run.get("startLongitude"),
         "distance_mi": round(last_run.get("distance", 0) / METERS_PER_MILE, 2),
         "duration_min": round(last_run.get("duration", 0) / 60, 1),
         "avg_pace_min_mi": _pace(last_run.get("distance"), last_run.get("duration")),

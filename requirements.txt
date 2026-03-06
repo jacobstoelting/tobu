@@ -1,5 +1,5 @@
 anthropic
 garminconnect
 python-dotenv
-questionary
+requests
 rich

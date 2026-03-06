@@ -5,6 +5,7 @@ from garmin import get_health_snapshot
 from checkin import run_checkin
 from db import get_runs_last_n_days, get_run_elo_ranking
 from coach import get_recommendation
+from weather import get_run_weather, get_forecast
 
 load_dotenv()
 
@@ -26,9 +27,18 @@ def main():
         health = get_health_snapshot(today_date)
         elo_ranking = get_run_elo_ranking(days=14)
 
+    with console.status("[dim]Fetching weather...[/dim]", spinner="dots"):
+        weather = get_run_weather(
+            current_run.get("start_lat"),
+            current_run.get("start_lon"),
+            current_run.get("date"),
+            current_run.get("duration_min"),
+        )
+        forecast = get_forecast(current_run.get("start_lat"), current_run.get("start_lon"))
+
     # Step 3: Get Claude's recommendation
     with console.status("[dim]Generating your next run recommendation...[/dim]", spinner="dots"):
-        recommendation = get_recommendation(current_run, recent_runs, health, feel, notes, comparisons, elo_ranking)
+        recommendation = get_recommendation(current_run, recent_runs, health, feel, notes, comparisons, elo_ranking, weather, forecast)
 
     console.print()
     console.print(Panel(
