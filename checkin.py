@@ -5,53 +5,82 @@ from dotenv import load_dotenv
 from rich.console import Console
 from rich.table import Table
 from garmin import get_last_run, get_recent_runs
-from db import save_run
+from db import save_run, save_comparisons, compute_and_save_elo
 
 load_dotenv()
 
 console = Console()
 
-FEEL_OPTIONS = {
-    "comparison": [
-        ("1", "EASIER", "green"),
-        ("2", "SAME",   "yellow"),
-        ("3", "HARDER", "red"),
-    ],
-    "general": [
-        ("1", "EASY",   "green"),
-        ("2", "MEDIUM", "yellow"),
-        ("3", "HARD",   "red"),
-    ],
-}
+COMPARISON_OPTIONS = [
+    ("1", "EASIER", "green"),
+    ("2", "SAME",   "yellow"),
+    ("3", "HARDER", "red"),
+]
+
+GENERAL_OPTIONS = [
+    ("1", "EASY",   "green"),
+    ("2", "MEDIUM", "yellow"),
+    ("3", "HARD",   "red"),
+]
 
 
-def prompt_feel(mode="comparison"):
-    options = FEEL_OPTIONS[mode]
-
-    console.print()
-    if mode == "comparison":
-        console.print("  How did this run feel [dim]compared to your recent runs?[/dim]  [dim](press 1, 2, or 3)[/dim]")
-    else:
-        console.print("  How hard was this run overall?  [dim](press 1, 2, or 3)[/dim]")
-    console.print()
-
-    for key, label, color in options:
-        console.print(f"    [{color} bold]({key})[/{color} bold]  [{color}]{label}[/{color}]")
-
-    console.print()
-    valid = {k for k, _, _ in options}
-    while True:
-        fd = sys.stdin.fileno()
-        old = termios.tcgetattr(fd)
-        try:
-            tty.setraw(fd)
+def _read_keypress(valid: set) -> tuple:
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        while True:
             ch = sys.stdin.read(1)
-        finally:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old)
-        if ch in valid:
-            label, color = next((label, color) for k, label, color in options if k == ch)
-            console.print(f"  [{color} bold]{label}[/{color} bold]")
-            return label.lower()
+            if ch in valid:
+                return ch
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+
+def prompt_feel_general():
+    console.print()
+    console.print("  How hard was this run overall?  [dim](press 1, 2, or 3)[/dim]")
+    console.print()
+    for key, label, color in GENERAL_OPTIONS:
+        console.print(f"    [{color} bold]({key})[/{color} bold]  [{color}]{label}[/{color}]")
+    console.print()
+    ch = _read_keypress({"1", "2", "3"})
+    label, color = next((lbl, col) for k, lbl, col in GENERAL_OPTIONS if k == ch)
+    console.print(f"  [{color} bold]{label}[/{color} bold]")
+    return label.lower()
+
+
+def prompt_pairwise_comparisons(today_run, comparison_runs):
+    """Ask the user to compare today's run against each past run individually.
+    Returns a list of {other_date, result} dicts."""
+    if not comparison_runs:
+        return []
+
+    console.print()
+    console.rule("[dim]Run Comparisons[/dim]")
+    console.print()
+    console.print("  Compare today's run to each recent run. Was today [green]easier[/green], [yellow]same[/yellow], or [red]harder[/red]?")
+    console.print()
+
+    results = []
+    for past_run in comparison_runs:
+        date_str = past_run["date"][:10]
+        dist = past_run["distance_mi"]
+        pace = past_run.get("avg_pace_min_mi") or past_run.get("avg_pace", "?")
+        hr_str = f"  HR {past_run['avg_hr']:.0f}" if past_run.get("avg_hr") else ""
+
+        console.print(f"  [dim]{date_str}[/dim]  {dist} mi  {pace}{hr_str}")
+        for key, label, color in COMPARISON_OPTIONS:
+            console.print(f"    [{color} bold]({key})[/{color} bold]  [{color}]{label}[/{color}]")
+
+        ch = _read_keypress({"1", "2", "3"})
+        label, color = next((lbl, col) for k, lbl, col in COMPARISON_OPTIONS if k == ch)
+        console.print(f"  → [{color} bold]{label}[/{color} bold]")
+        console.print()
+
+        results.append({"other_date": date_str, "result": label.lower()})
+
+    return results
 
 
 def run_checkin():
@@ -82,7 +111,7 @@ def run_checkin():
 
     # Recent runs comparison
     with console.status("[dim]Fetching recent runs...[/dim]", spinner="dots"):
-        recent = get_recent_runs(days=14)
+        recent = get_recent_runs(days=7)
 
     today_date = current_run["date"][:10]
     comparison_runs = [r for r in recent if not r["date"].startswith(today_date)]
@@ -109,10 +138,12 @@ def run_checkin():
             )
         console.print(hist_table)
 
-        feel = prompt_feel("comparison")
+        feel = "compared"  # placeholder — actual feel comes from pairwise comparisons
+        comparisons = prompt_pairwise_comparisons(current_run, comparison_runs)
     else:
         console.print("  [dim]No runs in the past 2 weeks — rating on general feel.[/dim]")
-        feel = prompt_feel("general")
+        feel = prompt_feel_general()
+        comparisons = []
 
     console.print()
     notes_raw = console.input("  [dim]Any notes? (press Enter to skip) →[/dim] ").strip()
@@ -122,16 +153,29 @@ def run_checkin():
     current_run["notes"] = notes
     save_run(current_run)
 
-    feel_color = {"easier": "green", "easy": "green",
-                  "same": "yellow", "medium": "yellow",
-                  "harder": "red", "hard": "red"}.get(feel, "white")
+    if comparisons:
+        today_date = current_run["date"][:10]
+        save_comparisons(today_date, comparisons)
+        compute_and_save_elo()
+        harder = sum(1 for c in comparisons if c["result"] == "harder")
+        easier = sum(1 for c in comparisons if c["result"] == "easier")
+        same   = sum(1 for c in comparisons if c["result"] == "same")
+        console.print()
+        console.rule()
+        console.print(
+            f"\n  Saved  [red bold]{harder} harder[/red bold]  "
+            f"[yellow bold]{same} same[/yellow bold]  "
+            f"[green bold]{easier} easier[/green bold]"
+            + (f"  [dim]— \"{notes}\"[/dim]" if notes else "")
+        )
+    else:
+        feel_color = {"easy": "green", "medium": "yellow", "hard": "red"}.get(feel, "white")
+        console.print()
+        console.rule()
+        console.print(f"\n  Saved  [{feel_color} bold]{feel.upper()}[/{feel_color} bold]"
+                      + (f"  [dim]— \"{notes}\"[/dim]" if notes else ""))
 
-    console.print()
-    console.rule()
-    console.print(f"\n  Saved  [{feel_color} bold]{feel.upper()}[/{feel_color} bold]"
-                  + (f"  [dim]— \"{notes}\"[/dim]" if notes else ""))
-
-    return current_run, feel, notes
+    return current_run, feel, notes, comparisons
 
 
 if __name__ == "__main__":

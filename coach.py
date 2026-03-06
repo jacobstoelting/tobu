@@ -6,18 +6,30 @@ load_dotenv()
 
 CLIENT = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
-SYSTEM_PROMPT = """You are Tobu, a personal AI running coach. Your job is to analyze a runner's most recent run and recommend what their next run should be.
+SYSTEM_PROMPT = """You are Tobu, a personal AI running coach. Respond in exactly two sections using these headers:
 
-Guidelines:
-- Keep weekly mileage increases within ~10% to avoid injury
-- Follow the 80/20 rule: ~80% of runs should be easy (zone 1-2), ~20% hard efforts
-- Factor in HRV, resting HR, body battery, and sleep quality when assessing recovery
-- If HRV is below baseline or body battery is low, lean toward rest or easy run
-- Infer run type from splits and HR zones (intervals, tempo, easy, long run)
-- Be concise — 3 to 5 sentences max
-- Output plain text only, no markdown, no bullet points
-- Use miles and min/mile for all distances and paces
-- End with a single specific next-run recommendation: type, distance in miles, and effort level"""
+ANALYZING YOUR RUN
+YOUR NEXT RUN
+
+Guidelines for ANALYZING YOUR RUN:
+- Interpret the data — don't just repeat numbers. Tell the runner what the data means.
+- Assess training load and estimate recovery time needed before the next hard effort.
+- If the runner mentions any issues, injuries, or notes, address them directly.
+- Identify trends over recent runs (improving, plateau, overreaching, etc.).
+- Flag anything relevant: 80/20 balance, injury warning signs, weekly mileage creep.
+- Use the ELO ranking and pairwise comparisons to contextualize how hard this run was relative to recent history.
+- Keep this section to 3-5 concise bullet points.
+
+Guidelines for YOUR NEXT RUN:
+- Recommend one specific next run. Be concrete: type, distance, effort level.
+- You may recommend structured workouts when appropriate, such as:
+  - Interval sessions (e.g., "4×1200m at 5K effort with 90s rest")
+  - Fartlek runs (e.g., "30-min fartlek — alternate 1 min hard / 2 min easy")
+  - Tempo runs (e.g., "4mi with 2mi at threshold pace")
+  - Easy/recovery runs, long runs, strides
+- Keep this section to 2-3 sentences.
+
+Use miles and min/mile for all distances and paces. Use plain prose with bullet points only in the analysis section."""
 
 
 def _fmt_splits(splits):
@@ -38,11 +50,36 @@ def _fmt_recent(recent_runs):
         load = r.get("training_load")
         load_str = f"load {load:.0f}" if load else ""
         pace = r.get("avg_pace_min_mi") or r.get("avg_pace", "?")
+        elo = r.get("elo_score")
+        elo_str = f"ELO {elo:.0f}" if elo else ""
         lines.append(
             f"  {r['date'][:10]}  {r['distance_mi']}mi  {pace}  "
-            f"avg HR {r.get('avg_hr', '?')}  {load_str}"
+            f"avg HR {r.get('avg_hr', '?')}  {load_str}  {elo_str}"
         )
     return "\n".join(lines)
+
+
+def _fmt_comparisons(comparisons, elo_ranking, today_date):
+    if not comparisons:
+        return "No pairwise comparisons available."
+    harder = sum(1 for c in comparisons if c["result"] == "harder")
+    easier = sum(1 for c in comparisons if c["result"] == "easier")
+    same   = sum(1 for c in comparisons if c["result"] == "same")
+    total  = len(comparisons)
+    summary = f"Harder than {harder}/{total} recent runs, easier than {easier}/{total}, same as {same}/{total}."
+
+    # ELO rank
+    rank_str = ""
+    if elo_ranking:
+        for i, r in enumerate(elo_ranking):
+            if r["date"][:10] == today_date[:10]:
+                rank_str = f" ELO rank: {i + 1} of {len(elo_ranking)} runs this period."
+                break
+
+    details = "\n".join(
+        f"  vs {c['other_date']}: {c['result']}" for c in comparisons
+    )
+    return f"{summary}{rank_str}\n{details}"
 
 
 def _fmt_hrv(hrv):
@@ -67,14 +104,15 @@ def _fmt_sleep(sleep):
     )
 
 
-def build_prompt(current_run, recent_runs, health, feel, notes):
+def build_prompt(current_run, recent_runs, health, feel, notes, comparisons=None, elo_ranking=None):
     splits_text = _fmt_splits(current_run.get("splits", []))
     recent_text = _fmt_recent(recent_runs)
+    comparison_text = _fmt_comparisons(comparisons or [], elo_ranking or [], current_run.get("date", ""))
 
     bb = health.get("body_battery") or {}
     stress = health.get("stress") or {}
 
-    prompt = f"""Here is data from my most recent run. Please recommend what my next run should be.
+    prompt = f"""Here is data from my most recent run. Analyze it and recommend my next run.
 
 --- TODAY'S RUN ---
 Date: {current_run['date'][:10]}
@@ -99,6 +137,9 @@ Splits:
 Feel rating: {feel}
 Notes: {notes or 'None'}
 
+--- PAIRWISE COMPARISONS & ELO ---
+{comparison_text}
+
 --- RECENT RUNS (past 2 weeks) ---
 {recent_text}
 
@@ -115,12 +156,12 @@ What should my next run be?"""
     return prompt
 
 
-def get_recommendation(current_run, recent_runs, health, feel, notes):
-    prompt = build_prompt(current_run, recent_runs, health, feel, notes)
+def get_recommendation(current_run, recent_runs, health, feel, notes, comparisons=None, elo_ranking=None):
+    prompt = build_prompt(current_run, recent_runs, health, feel, notes, comparisons, elo_ranking)
 
     message = CLIENT.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=400,
+        max_tokens=800,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": prompt}],
     )

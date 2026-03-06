@@ -3,7 +3,7 @@ from rich.console import Console
 from rich.panel import Panel
 from garmin import get_health_snapshot
 from checkin import run_checkin
-from db import get_runs_last_n_days
+from db import get_runs_last_n_days, get_run_elo_ranking
 from coach import get_recommendation
 
 load_dotenv()
@@ -16,7 +16,7 @@ def main():
     result = run_checkin()
     if not result:
         return
-    current_run, feel, notes = result
+    current_run, feel, notes, comparisons = result
 
     # Step 2: Fetch supporting context for Claude
     today_date = current_run["date"][:10]
@@ -24,10 +24,11 @@ def main():
         recent_runs = get_runs_last_n_days(14)
         recent_runs = [r for r in recent_runs if not r.get("date", "").startswith(today_date)]
         health = get_health_snapshot(today_date)
+        elo_ranking = get_run_elo_ranking(days=14)
 
     # Step 3: Get Claude's recommendation
     with console.status("[dim]Generating your next run recommendation...[/dim]", spinner="dots"):
-        recommendation = get_recommendation(current_run, recent_runs, health, feel, notes)
+        recommendation = get_recommendation(current_run, recent_runs, health, feel, notes, comparisons, elo_ranking)
 
     console.print()
     console.print(Panel(

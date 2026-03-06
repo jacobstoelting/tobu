@@ -77,15 +77,15 @@ When analyzing a run and generating recommendations, Claude should:
 ### Phase 1 — Foundation & Research
 - [x] Name the app (Tobu)
 - [x] Set up Notion workspace
-- [ ] Read `python-garminconnect` docs and run demo.py
-- [ ] Identify exact Garmin fields to pull
-- [ ] Get Anthropic API key and test a basic Claude call
+- [x] Read `python-garminconnect` docs and run demo.py
+- [x] Identify exact Garmin fields to pull
+- [x] Get Anthropic API key and test a basic Claude call
 - [ ] Research OpenWeatherMap API
 - [ ] Research OpenTopoData API
 
 ### Phase 2 — Core Data Loop (MVP)
-- [ ] Script to log into Garmin and pull last run stats
-- [ ] Design post-run check-in (harder / easier / same + optional text)
+- [x] Script to log into Garmin and pull last run stats
+- [x] Design post-run check-in (harder / easier / same + optional text)
 - [ ] Build Claude prompt with run data + check-in
 - [ ] Get Claude returning a plain-text next-run recommendation
 - [ ] Test end-to-end on a real run
