@@ -149,3 +149,67 @@ def get_run_elo_ranking(days=14):
             (cutoff,)
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def get_run_by_date(date: str):
+    """Returns the saved run for a given date, or None."""
+    init_db()
+    date_key = date[:10]
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT * FROM runs WHERE date LIKE ? ORDER BY recorded_at DESC LIMIT 1",
+            (f"{date_key}%",)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def has_comparisons(date: str) -> bool:
+    """Returns True if the run on this date has pairwise comparisons stored."""
+    init_db()
+    date_key = date[:10]
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM run_comparisons WHERE today_date LIKE ?",
+            (f"{date_key}%",)
+        ).fetchone()
+    return row[0] > 0
+
+
+def get_comparisons_for_run(date: str) -> list:
+    """Returns all pairwise comparisons for a given run date."""
+    init_db()
+    date_key = date[:10]
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT today_date, other_date, result FROM run_comparisons "
+            "WHERE today_date LIKE ? ORDER BY recorded_at",
+            (f"{date_key}%",)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def update_comparison(today_date: str, other_date: str, new_result: str):
+    """Update a single pairwise comparison result and recompute ELO."""
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "UPDATE run_comparisons SET result = ?, recorded_at = ? "
+            "WHERE today_date LIKE ? AND other_date LIKE ?",
+            (new_result, datetime.now().isoformat(),
+             f"{today_date[:10]}%", f"{other_date[:10]}%")
+        )
+    compute_and_save_elo()
+
+
+def delete_comparisons_for_run(date: str):
+    """Delete all comparisons for a run and recompute ELO."""
+    init_db()
+    date_key = date[:10]
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "DELETE FROM run_comparisons WHERE today_date LIKE ?",
+            (f"{date_key}%",)
+        )
+    compute_and_save_elo()

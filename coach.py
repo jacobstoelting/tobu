@@ -17,7 +17,7 @@ Guidelines for ANALYZING YOUR RUN:
 - If the runner mentions any issues, injuries, or notes, address them directly.
 - Identify trends over recent runs (improving, plateau, overreaching, etc.).
 - Flag anything relevant: 80/20 balance, injury warning signs, weekly mileage creep.
-- Use the ELO ranking and pairwise comparisons to contextualize how hard this run was relative to recent history.
+- Use the ELO ranking and pairwise comparisons to contextualize how hard this run was relative to recent history. Do not mention ELO scores or rankings in your response — use them only to inform your interpretation.
 - Factor in weather only if it meaningfully affected performance (e.g., significant heat, high humidity, strong wind, notable altitude). Do not list raw weather stats — interpret the impact.
 - Keep this section to 3-5 concise bullet points.
 
@@ -105,12 +105,12 @@ def _fmt_comparisons(comparisons, elo_ranking, today_date):
     total  = len(comparisons)
     summary = f"Harder than {harder}/{total} recent runs, easier than {easier}/{total}, same as {same}/{total}."
 
-    # ELO rank
+    # ELO rank (for context only — not shown in output)
     rank_str = ""
     if elo_ranking:
         for i, r in enumerate(elo_ranking):
             if r["date"][:10] == today_date[:10]:
-                rank_str = f" ELO rank: {i + 1} of {len(elo_ranking)} runs this period."
+                rank_str = f" Relative difficulty rank: {i + 1} of {len(elo_ranking)} (use for context only, do not quote this)."
                 break
 
     details = "\n".join(
@@ -156,7 +156,7 @@ def build_prompt(current_run, recent_runs, health, feel, notes, comparisons=None
 Date: {current_run['date'][:10]}
 Distance: {current_run['distance_mi']} mi
 Duration: {current_run['duration_min']} min
-Avg pace: {current_run['avg_pace_min_mi']}
+Avg pace: {current_run.get('avg_pace_min_mi') or current_run.get('avg_pace', '?')}
 Fastest mile: {current_run.get('fastest_mile_pace')}
 Avg HR: {current_run.get('avg_hr')} bpm  Max HR: {current_run.get('max_hr')} bpm
 HR zones (seconds): Z1={current_run.get('hr_zone_1_sec', 0):.0f}  Z2={current_run.get('hr_zone_2_sec', 0):.0f}  Z3={current_run.get('hr_zone_3_sec', 0):.0f}  Z4={current_run.get('hr_zone_4_sec', 0):.0f}  Z5={current_run.get('hr_zone_5_sec', 0):.0f}

@@ -4,8 +4,9 @@ import termios
 from dotenv import load_dotenv
 from rich.console import Console
 from rich.table import Table
+from prompt_toolkit import prompt as pt_prompt
 from garmin import get_last_run, get_recent_runs
-from db import save_run, save_comparisons, compute_and_save_elo
+from db import save_run, save_comparisons, compute_and_save_elo, get_run_by_date, get_comparisons_for_run
 
 load_dotenv()
 
@@ -97,7 +98,7 @@ def run_checkin():
 
     # Today's run summary
     date_str = current_run["date"][:10]
-    console.print(f"  [bold]Today's run[/bold]  [dim]{date_str}[/dim]")
+    console.print(f"  [bold]{date_str}[/bold]")
     console.print()
 
     run_table = Table(box=None, show_header=False, padding=(0, 2))
@@ -108,6 +109,30 @@ def run_checkin():
     run_table.add_row("Avg HR",    f"{current_run['avg_hr']:.0f} bpm")
     run_table.add_row("Duration",  f"{current_run['duration_min']} min")
     console.print(run_table)
+
+    # Skip rating if already done
+    existing = get_run_by_date(date_str)
+    if existing and existing.get("feel"):
+        existing_comparisons = get_comparisons_for_run(date_str)
+        console.print()
+        console.print("  [dim]Already rated.[/dim]", end="  ")
+        if existing_comparisons:
+            harder = sum(1 for c in existing_comparisons if c["result"] == "harder")
+            easier = sum(1 for c in existing_comparisons if c["result"] == "easier")
+            same   = sum(1 for c in existing_comparisons if c["result"] == "same")
+            console.print(
+                f"[red bold]{harder} harder[/red bold]  "
+                f"[yellow bold]{same} same[/yellow bold]  "
+                f"[green bold]{easier} easier[/green bold]",
+                end="  "
+            )
+        feel_color = {"easy": "green", "medium": "yellow", "hard": "red", "compared": "dim"}.get(existing["feel"], "white")
+        console.print(f"[{feel_color}]{existing['feel'].upper()}[/{feel_color}]")
+        if existing.get("notes"):
+            console.print(f"  [dim]\"{existing['notes']}\"[/dim]")
+        console.print("  [dim]Edit ratings via the web UI.[/dim]")
+        console.print()
+        return existing, existing["feel"], existing.get("notes"), existing_comparisons
 
     # Recent runs comparison
     with console.status("[dim]Fetching recent runs...[/dim]", spinner="dots"):
@@ -146,7 +171,7 @@ def run_checkin():
         comparisons = []
 
     console.print()
-    notes_raw = console.input("  [dim]Any notes? (press Enter to skip) →[/dim] ").strip()
+    notes_raw = pt_prompt("  Any notes? (press Enter to skip) → ").strip()
     notes = notes_raw or None
 
     current_run["feel"] = feel
