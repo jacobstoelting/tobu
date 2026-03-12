@@ -1,6 +1,9 @@
 anthropic
+fastapi
 garminconnect
+psycopg2-binary
 python-dotenv
 prompt_toolkit
 requests
 rich
+uvicorn

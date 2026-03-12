@@ -1,42 +1,64 @@
-import sqlite3
 import os
+import psycopg2
+import psycopg2.extras
+from contextlib import contextmanager
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "tobu.db")
+load_dotenv()
 
 ELO_K = 32
 ELO_DEFAULT = 1000
 
 
+@contextmanager
+def _db():
+    """Context manager that yields a connection and auto-commits or rolls back."""
+    conn = psycopg2.connect(os.environ["DATABASE_URL"])
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def _cursor(conn):
+    """Returns a cursor that produces dicts."""
+    return conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+
 def init_db():
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("""
+    with _db() as conn:
+        cur = _cursor(conn)
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS runs (
-                id               INTEGER PRIMARY KEY AUTOINCREMENT,
-                date             TEXT,
-                distance_mi      REAL,
-                duration_min     REAL,
-                avg_pace         TEXT,
-                avg_hr           REAL,
-                max_hr           REAL,
-                avg_cadence      REAL,
+                id                SERIAL PRIMARY KEY,
+                date              TEXT,
+                distance_mi       REAL,
+                duration_min      REAL,
+                avg_pace          TEXT,
+                avg_hr            REAL,
+                max_hr            REAL,
+                avg_cadence       REAL,
                 elevation_gain_ft REAL,
-                training_effect  REAL,
-                training_load    REAL,
-                vo2max           REAL,
-                feel             TEXT,
-                notes            TEXT,
-                recorded_at      TEXT,
-                elo_score        REAL DEFAULT 1000
+                training_effect   REAL,
+                training_load     REAL,
+                vo2max            REAL,
+                feel              TEXT,
+                notes             TEXT,
+                recorded_at       TEXT,
+                elo_score         REAL DEFAULT 1000
             )
         """)
-        try:
-            conn.execute("ALTER TABLE runs ADD COLUMN elo_score REAL DEFAULT 1000")
-        except Exception:
-            pass  # column already exists
-        conn.execute("""
+        cur.execute("""
+            ALTER TABLE runs ADD COLUMN IF NOT EXISTS elo_score REAL DEFAULT 1000
+        """)
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS run_comparisons (
-                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                id           SERIAL PRIMARY KEY,
                 today_date   TEXT,
                 other_date   TEXT,
                 result       TEXT,
@@ -47,14 +69,15 @@ def init_db():
 
 def save_run(run_data: dict):
     init_db()
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("""
+    with _db() as conn:
+        cur = _cursor(conn)
+        cur.execute("""
             INSERT INTO runs (
                 date, distance_mi, duration_min, avg_pace,
                 avg_hr, max_hr, avg_cadence, elevation_gain_ft,
                 training_effect, training_load, vo2max,
                 feel, notes, recorded_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             run_data.get("date"),
             run_data.get("distance_mi"),
@@ -76,40 +99,45 @@ def save_run(run_data: dict):
 def get_runs_last_n_days(n=14):
     init_db()
     cutoff = (datetime.now() - timedelta(days=n)).strftime("%Y-%m-%d %H:%M:%S")
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            "SELECT * FROM runs WHERE date >= ? ORDER BY date DESC", (cutoff,)
-        ).fetchall()
-    return [dict(r) for r in rows]
+    with _db() as conn:
+        cur = _cursor(conn)
+        cur.execute(
+            "SELECT * FROM runs WHERE date >= %s ORDER BY date DESC", (cutoff,)
+        )
+        return [dict(r) for r in cur.fetchall()]
 
 
 def save_comparisons(today_date: str, comparisons: list):
     init_db()
     now = datetime.now().isoformat()
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.executemany("""
+    with _db() as conn:
+        cur = _cursor(conn)
+        cur.executemany("""
             INSERT INTO run_comparisons (today_date, other_date, result, recorded_at)
-            VALUES (?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s)
         """, [(today_date, c["other_date"], c["result"], now) for c in comparisons])
 
 
 def compute_and_save_elo():
     """Replay all stored comparisons to compute ELO scores for every run."""
     init_db()
-    with sqlite3.connect(DB_PATH) as conn:
+    with _db() as conn:
+        cur = _cursor(conn)
+
         # Load all run dates and seed scores
-        rows = conn.execute("SELECT date FROM runs").fetchall()
-        scores = {r[0][:10]: ELO_DEFAULT for r in rows}
+        cur.execute("SELECT date FROM runs")
+        scores = {r["date"][:10]: ELO_DEFAULT for r in cur.fetchall()}
 
         # Replay comparisons in chronological order
-        comps = conn.execute(
+        cur.execute(
             "SELECT today_date, other_date, result FROM run_comparisons ORDER BY recorded_at"
-        ).fetchall()
+        )
+        comps = cur.fetchall()
 
-        for today_date, other_date, result in comps:
-            td = today_date[:10]
-            od = other_date[:10]
+        for row in comps:
+            td = row["today_date"][:10]
+            od = row["other_date"][:10]
+            result = row["result"]
             if td not in scores:
                 scores[td] = ELO_DEFAULT
             if od not in scores:
@@ -119,11 +147,11 @@ def compute_and_save_elo():
             r_other = scores[od]
             expected_today = 1 / (1 + 10 ** ((r_other - r_today) / 400))
 
-            if result == "harder":      # today won
+            if result == "harder":
                 actual = 1.0
-            elif result == "easier":    # today lost
+            elif result == "easier":
                 actual = 0.0
-            else:                       # same = draw
+            else:
                 actual = 0.5
 
             scores[td] = r_today + ELO_K * (actual - expected_today)
@@ -131,8 +159,8 @@ def compute_and_save_elo():
 
         # Write scores back
         for date_key, score in scores.items():
-            conn.execute(
-                "UPDATE runs SET elo_score = ? WHERE date LIKE ?",
+            cur.execute(
+                "UPDATE runs SET elo_score = %s WHERE date LIKE %s",
                 (round(score, 1), f"{date_key}%")
             )
 
@@ -141,26 +169,27 @@ def get_run_elo_ranking(days=14):
     """Returns recent runs sorted by elo_score descending."""
     init_db()
     cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
+    with _db() as conn:
+        cur = _cursor(conn)
+        cur.execute(
             "SELECT date, distance_mi, avg_pace, elo_score FROM runs "
-            "WHERE date >= ? ORDER BY elo_score DESC",
+            "WHERE date >= %s ORDER BY elo_score DESC",
             (cutoff,)
-        ).fetchall()
-    return [dict(r) for r in rows]
+        )
+        return [dict(r) for r in cur.fetchall()]
 
 
 def get_run_by_date(date: str):
     """Returns the saved run for a given date, or None."""
     init_db()
     date_key = date[:10]
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.row_factory = sqlite3.Row
-        row = conn.execute(
-            "SELECT * FROM runs WHERE date LIKE ? ORDER BY recorded_at DESC LIMIT 1",
+    with _db() as conn:
+        cur = _cursor(conn)
+        cur.execute(
+            "SELECT * FROM runs WHERE date LIKE %s ORDER BY recorded_at DESC LIMIT 1",
             (f"{date_key}%",)
-        ).fetchone()
+        )
+        row = cur.fetchone()
     return dict(row) if row else None
 
 
@@ -168,35 +197,37 @@ def has_comparisons(date: str) -> bool:
     """Returns True if the run on this date has pairwise comparisons stored."""
     init_db()
     date_key = date[:10]
-    with sqlite3.connect(DB_PATH) as conn:
-        row = conn.execute(
-            "SELECT COUNT(*) FROM run_comparisons WHERE today_date LIKE ?",
+    with _db() as conn:
+        cur = _cursor(conn)
+        cur.execute(
+            "SELECT COUNT(*) AS count FROM run_comparisons WHERE today_date LIKE %s",
             (f"{date_key}%",)
-        ).fetchone()
-    return row[0] > 0
+        )
+        return cur.fetchone()["count"] > 0
 
 
 def get_comparisons_for_run(date: str) -> list:
     """Returns all pairwise comparisons for a given run date."""
     init_db()
     date_key = date[:10]
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
+    with _db() as conn:
+        cur = _cursor(conn)
+        cur.execute(
             "SELECT today_date, other_date, result FROM run_comparisons "
-            "WHERE today_date LIKE ? ORDER BY recorded_at",
+            "WHERE today_date LIKE %s ORDER BY recorded_at",
             (f"{date_key}%",)
-        ).fetchall()
-    return [dict(r) for r in rows]
+        )
+        return [dict(r) for r in cur.fetchall()]
 
 
 def update_comparison(today_date: str, other_date: str, new_result: str):
     """Update a single pairwise comparison result and recompute ELO."""
     init_db()
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute(
-            "UPDATE run_comparisons SET result = ?, recorded_at = ? "
-            "WHERE today_date LIKE ? AND other_date LIKE ?",
+    with _db() as conn:
+        cur = _cursor(conn)
+        cur.execute(
+            "UPDATE run_comparisons SET result = %s, recorded_at = %s "
+            "WHERE today_date LIKE %s AND other_date LIKE %s",
             (new_result, datetime.now().isoformat(),
              f"{today_date[:10]}%", f"{other_date[:10]}%")
         )
@@ -207,9 +238,10 @@ def delete_comparisons_for_run(date: str):
     """Delete all comparisons for a run and recompute ELO."""
     init_db()
     date_key = date[:10]
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute(
-            "DELETE FROM run_comparisons WHERE today_date LIKE ?",
+    with _db() as conn:
+        cur = _cursor(conn)
+        cur.execute(
+            "DELETE FROM run_comparisons WHERE today_date LIKE %s",
             (f"{date_key}%",)
         )
     compute_and_save_elo()
