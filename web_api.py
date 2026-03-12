@@ -175,10 +175,11 @@ def get_or_generate_weekly_summary():
     """
     today = datetime.now()
     week_start = (today - timedelta(days=today.weekday())).strftime("%Y-%m-%d")
-    existing = get_weekly_summary_db(week_start)
-    if existing:
-        return existing
     runs = get_runs_last_n_days(7)
+    existing = get_weekly_summary_db(week_start)
+    if existing and runs:
+        return existing
     summary = coach.get_weekly_summary(runs)
-    save_weekly_summary_db(week_start, summary)
+    if runs:
+        save_weekly_summary_db(week_start, summary)
     return {"week_start": week_start, "summary": summary}
