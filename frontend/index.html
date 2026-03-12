@@ -15,7 +15,10 @@
 
         <!-- RECENT RUNS -->
         <section class="page-section">
-            <div class="section-label">Recent Runs</div>
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px;">
+                <div class="section-label" style="margin-bottom:0;">Recent Runs</div>
+                <button class="btn-sync" id="btn-sync" onclick="syncGarmin()">↻ Sync Garmin</button>
+            </div>
             <div class="runs-grid" id="runs-grid">
                 <!-- Skeleton loaders -->
                 <div class="run-card">
@@ -132,6 +135,25 @@
             } catch (e) {
                 document.getElementById('weekly-summary').textContent = 'Could not load weekly summary.';
             }
+        }
+
+        async function syncGarmin() {
+            const btn = document.getElementById('btn-sync');
+            btn.disabled = true;
+            btn.textContent = 'Syncing...';
+            try {
+                const res = await fetch(`${API}/api/sync`, { method: 'POST' });
+                const data = await res.json();
+                btn.textContent = `✓ ${data.synced} new`;
+                await loadRuns();
+                await loadWeeklySummary();
+            } catch (e) {
+                btn.textContent = 'Sync failed';
+            }
+            setTimeout(() => {
+                btn.disabled = false;
+                btn.textContent = '↻ Sync Garmin';
+            }, 3000);
         }
 
         loadRuns();

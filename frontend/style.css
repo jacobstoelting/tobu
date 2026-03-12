@@ -462,6 +462,30 @@ nav {
     cursor: not-allowed;
 }
 
+/* SYNC BUTTON */
+.btn-sync {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    border-radius: var(--radius-sm);
+    padding: 7px 14px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: border-color 0.2s, color 0.2s;
+    font-family: inherit;
+}
+
+.btn-sync:hover {
+    border-color: var(--border-accent);
+    color: var(--accent-bright);
+}
+
+.btn-sync:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 .empty-chat {
     color: var(--text-muted);
     font-size: 13px;

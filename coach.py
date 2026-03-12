@@ -218,7 +218,7 @@ def get_weekly_summary(runs: list) -> str:
     if not runs:
         return "No runs this week yet."
     recent_text = _fmt_recent(runs)
-    prompt = f"""Based on these runs from the past week, write a brief 2-3 sentence coaching summary of how training is going and what to focus on next week. Be direct and specific.
+    prompt = f"""Based on {len(runs)} run(s) from the past week, write a brief 2-3 sentence coaching summary of how training is going and what to focus on next. Work with whatever data is available — even one run tells us something useful. Be direct and specific, no caveats about data quantity.
 
 {recent_text}"""
     message = CLIENT.messages.create(

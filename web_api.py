@@ -184,3 +184,20 @@ def get_or_generate_weekly_summary():
     summary = coach.get_weekly_summary(runs)
     save_weekly_summary_db(week_start, summary)
     return {"week_start": week_start, "summary": summary}
+
+
+def sync_from_garmin(days=30):
+    """
+    Pull recent runs from Garmin and save any that aren't already in the DB.
+    Web route: POST /api/sync
+    Returns: {"synced": int, "total": int}
+    """
+    from garmin import get_recent_runs as garmin_get_recent_runs
+    runs = garmin_get_recent_runs(days=days)
+    new_count = 0
+    for run in runs:
+        date_key = run["date"][:10]
+        if not get_run_by_date(date_key):
+            save_run(run)
+            new_count += 1
+    return {"synced": new_count, "total": len(runs)}

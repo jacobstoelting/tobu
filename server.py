@@ -84,6 +84,11 @@ def health():
     return {"status": "ok"}
 
 
+@app.post("/api/sync")
+def sync_garmin(days: int = 30):
+    return web_api.sync_from_garmin(days=days)
+
+
 @app.get("/api/analysis/latest")
 def get_latest_analysis():
     return web_api.get_latest_analysis()
