@@ -29,6 +29,9 @@ class SubmitRatingsRequest(BaseModel):
 class UpdateRatingRequest(BaseModel):
     result: str
 
+class ChatRequest(BaseModel):
+    message: str
+
 
 # --- Routes ---
 
@@ -79,3 +82,30 @@ def elo_leaderboard(days: int = 14):
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/api/analysis/latest")
+def get_latest_analysis():
+    return web_api.get_latest_analysis()
+
+
+@app.post("/api/analysis/generate")
+def generate_analysis():
+    try:
+        return web_api.generate_analysis()
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/api/analysis/{date}/chat")
+def chat(date: str, body: ChatRequest):
+    return web_api.send_chat_message(date, body.message)
+
+
+@app.get("/api/summary/weekly")
+def weekly_summary():
+    return web_api.get_or_generate_weekly_summary()
+
+
+from fastapi.staticfiles import StaticFiles
+app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")

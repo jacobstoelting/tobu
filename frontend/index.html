@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tobu</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <nav>
+        <a class="nav-logo" href="/">Tobu <span>飛ぶ</span></a>
+    </nav>
+
+    <div class="container">
+
+        <!-- RECENT RUNS -->
+        <section class="page-section">
+            <div class="section-label">Recent Runs</div>
+            <div class="runs-grid" id="runs-grid">
+                <!-- Skeleton loaders -->
+                <div class="run-card">
+                    <div class="skeleton skeleton-map"></div>
+                    <div class="skeleton skeleton-text" style="width:40%; margin-top:12px;"></div>
+                    <div class="skeleton skeleton-text" style="width:80%; margin-bottom:16px;"></div>
+                </div>
+                <div class="run-card">
+                    <div class="skeleton skeleton-map"></div>
+                    <div class="skeleton skeleton-text" style="width:40%; margin-top:12px;"></div>
+                    <div class="skeleton skeleton-text" style="width:80%; margin-bottom:16px;"></div>
+                </div>
+                <div class="run-card">
+                    <div class="skeleton skeleton-map"></div>
+                    <div class="skeleton skeleton-text" style="width:40%; margin-top:12px;"></div>
+                    <div class="skeleton skeleton-text" style="width:80%; margin-bottom:16px;"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ANALYZE BUTTON -->
+        <div class="analyze-section">
+            <a href="/analyze.html" class="btn-analyze">
+                Analyze Your Run →
+            </a>
+        </div>
+
+        <!-- WEEKLY SUMMARY -->
+        <section class="page-section" style="padding-top:0;">
+            <div class="section-label">This Week</div>
+            <div class="summary-card">
+                <p class="summary-text" id="weekly-summary">Loading weekly summary...</p>
+            </div>
+        </section>
+
+    </div>
+
+    <script>
+        const API = '';
+
+        function formatDate(dateStr) {
+            const d = new Date(dateStr);
+            return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        }
+
+        function makeRoutesvg() {
+            // Generates a random-ish decorative route line
+            const w = 300, h = 225;
+            const points = [];
+            let x = 40, y = h / 2;
+            for (let i = 0; i < 8; i++) {
+                points.push(`${x},${y}`);
+                x += (w - 80) / 7 + (Math.random() * 10 - 5);
+                y += Math.random() * 60 - 30;
+                y = Math.max(30, Math.min(h - 30, y));
+            }
+            points.push(`${w - 40},${h / 2}`);
+            return `<svg class="map-route" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">
+                <polyline points="${points.join(' ')}" fill="none" stroke="#3b82f6" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.7"/>
+                <circle cx="${points[0].split(',')[0]}" cy="${points[0].split(',')[1]}" r="4" fill="#34d399"/>
+                <circle cx="${points[points.length-1].split(',')[0]}" cy="${points[points.length-1].split(',')[1]}" r="4" fill="#f87171"/>
+            </svg>`;
+        }
+
+        function renderRunCard(run) {
+            const card = document.createElement('div');
+            card.className = 'run-card';
+            card.innerHTML = `
+                <div class="map-placeholder">
+                    ${makeRoutesvg()}
+                    <span class="map-label">Route Preview</span>
+                </div>
+                <div class="run-date">${formatDate(run.date)}</div>
+                <div class="run-stats">
+                    <div class="stat">
+                        <span class="stat-value">${run.distance_mi ? run.distance_mi.toFixed(1) : '—'}</span>
+                        <span class="stat-label">Miles</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-value">${run.avg_pace || '—'}</span>
+                        <span class="stat-label">Pace</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-value">${run.avg_hr ? Math.round(run.avg_hr) : '—'}</span>
+                        <span class="stat-label">Avg HR</span>
+                    </div>
+                </div>
+            `;
+            return card;
+        }
+
+        async function loadRuns() {
+            try {
+                const res = await fetch(`${API}/api/runs?days=30`);
+                const runs = await res.json();
+                const grid = document.getElementById('runs-grid');
+                grid.innerHTML = '';
+                const recent = runs.slice(0, 3);
+                if (recent.length === 0) {
+                    grid.innerHTML = '<p style="color:var(--text-muted); grid-column:1/-1; text-align:center; padding:40px 0;">No runs yet.</p>';
+                    return;
+                }
+                recent.forEach(run => grid.appendChild(renderRunCard(run)));
+            } catch (e) {
+                document.getElementById('runs-grid').innerHTML = '<p style="color:var(--text-muted); grid-column:1/-1; text-align:center; padding:40px 0;">Could not load runs.</p>';
+            }
+        }
+
+        async function loadWeeklySummary() {
+            try {
+                const res = await fetch(`${API}/api/summary/weekly`);
+                const data = await res.json();
+                document.getElementById('weekly-summary').textContent = data.summary || 'No summary available.';
+            } catch (e) {
+                document.getElementById('weekly-summary').textContent = 'Could not load weekly summary.';
+            }
+        }
+
+        loadRuns();
+        loadWeeklySummary();
+    </script>
+</body>
+</html>

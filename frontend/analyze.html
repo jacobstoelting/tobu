@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analyze — Tobu</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <nav>
+        <a class="nav-logo" href="/">Tobu <span>飛ぶ</span></a>
+    </nav>
+
+    <div class="container">
+        <a href="/" class="back-link">← Back</a>
+
+        <!-- RUN HEADER -->
+        <div class="run-header">
+            <div class="run-title" id="run-title">Loading run...</div>
+            <div class="stats-grid" id="stats-grid">
+                <div class="stat-card"><div class="skeleton" style="height:22px;margin-bottom:6px;border-radius:4px;"></div><div class="skeleton" style="height:12px;width:60%;border-radius:4px;"></div></div>
+                <div class="stat-card"><div class="skeleton" style="height:22px;margin-bottom:6px;border-radius:4px;"></div><div class="skeleton" style="height:12px;width:60%;border-radius:4px;"></div></div>
+                <div class="stat-card"><div class="skeleton" style="height:22px;margin-bottom:6px;border-radius:4px;"></div><div class="skeleton" style="height:12px;width:60%;border-radius:4px;"></div></div>
+                <div class="stat-card"><div class="skeleton" style="height:22px;margin-bottom:6px;border-radius:4px;"></div><div class="skeleton" style="height:12px;width:60%;border-radius:4px;"></div></div>
+            </div>
+        </div>
+
+        <!-- ANALYSIS -->
+        <section class="page-section" style="padding-top:0;">
+            <div class="analysis-header">
+                <div class="section-label" style="margin-bottom:0;">Analysis</div>
+                <button class="btn-reanalyze" id="btn-reanalyze" onclick="reanalyze()">
+                    ↻ Re-analyze
+                </button>
+            </div>
+            <div class="card">
+                <div id="analysis-content">
+                    <p class="no-analysis">Loading analysis...</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- FOLLOW UP CHAT -->
+        <section class="page-section" style="padding-top:0; padding-bottom:64px;">
+            <div class="section-label">Follow Up</div>
+            <div class="card">
+                <div class="chat-messages" id="chat-messages">
+                    <p class="empty-chat">Ask a follow-up question about your run or training...</p>
+                </div>
+                <div class="chat-input-row">
+                    <input
+                        class="chat-input"
+                        id="chat-input"
+                        type="text"
+                        placeholder="Ask anything about your run..."
+                        onkeydown="if(event.key==='Enter') sendChat()"
+                    />
+                    <button class="btn-send" id="btn-send" onclick="sendChat()">Send</button>
+                </div>
+            </div>
+        </section>
+
+    </div>
+
+    <script>
+        const API = '';
+        let currentRunDate = null;
+
+        function formatDate(dateStr) {
+            const d = new Date(dateStr + 'T12:00:00');
+            return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+        }
+
+        async function loadLatestRun() {
+            try {
+                const res = await fetch(`${API}/api/runs?days=30`);
+                const runs = await res.json();
+                if (!runs || runs.length === 0) {
+                    document.getElementById('run-title').textContent = 'No runs found';
+                    return;
+                }
+                const run = runs[0];
+                currentRunDate = run.date.substring(0, 10);
+                document.getElementById('run-title').textContent = formatDate(currentRunDate);
+                document.getElementById('stats-grid').innerHTML = `
+                    <div class="stat-card">
+                        <div class="stat-value">${run.distance_mi ? run.distance_mi.toFixed(2) : '—'} mi</div>
+                        <div class="stat-label">Distance</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${run.avg_pace || '—'}</div>
+                        <div class="stat-label">Avg Pace</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${run.avg_hr ? Math.round(run.avg_hr) + ' bpm' : '—'}</div>
+                        <div class="stat-label">Avg HR</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${run.duration_min ? Math.round(run.duration_min) + ' min' : '—'}</div>
+                        <div class="stat-label">Duration</div>
+                    </div>
+                `;
+            } catch (e) {
+                document.getElementById('run-title').textContent = 'Could not load run';
+            }
+        }
+
+        async function loadAnalysis() {
+            try {
+                const res = await fetch(`${API}/api/analysis/latest`);
+                const data = await res.json();
+                const el = document.getElementById('analysis-content');
+                if (!data || !data.recommendation) {
+                    el.innerHTML = '<p class="no-analysis">No analysis yet. Run the terminal check-in or click Re-analyze.</p>';
+                } else {
+                    el.innerHTML = `<p class="analysis-text">${data.recommendation}</p>`;
+                }
+            } catch (e) {
+                document.getElementById('analysis-content').innerHTML = '<p class="no-analysis">Could not load analysis.</p>';
+            }
+        }
+
+        async function reanalyze() {
+            const btn = document.getElementById('btn-reanalyze');
+            const el = document.getElementById('analysis-content');
+            btn.disabled = true;
+            btn.textContent = 'Analyzing...';
+            el.innerHTML = '<p class="no-analysis">Generating analysis...</p>';
+            try {
+                const res = await fetch(`${API}/api/analysis/generate`, { method: 'POST' });
+                const data = await res.json();
+                if (data.recommendation) {
+                    el.innerHTML = `<p class="analysis-text">${data.recommendation}</p>`;
+                } else {
+                    el.innerHTML = '<p class="no-analysis">Could not generate analysis.</p>';
+                }
+            } catch (e) {
+                el.innerHTML = '<p class="no-analysis">Error generating analysis.</p>';
+            }
+            btn.disabled = false;
+            btn.innerHTML = '↻ Re-analyze';
+        }
+
+        async function sendChat() {
+            const input = document.getElementById('chat-input');
+            const message = input.value.trim();
+            if (!message || !currentRunDate) return;
+
+            const container = document.getElementById('chat-messages');
+            const btn = document.getElementById('btn-send');
+
+            // Remove empty state
+            const empty = container.querySelector('.empty-chat');
+            if (empty) empty.remove();
+
+            // Add user bubble
+            const userBubble = document.createElement('div');
+            userBubble.className = 'chat-bubble user';
+            userBubble.textContent = message;
+            container.appendChild(userBubble);
+            container.scrollTop = container.scrollHeight;
+
+            input.value = '';
+            btn.disabled = true;
+            btn.textContent = '...';
+
+            // Add loading bubble
+            const loadingBubble = document.createElement('div');
+            loadingBubble.className = 'chat-bubble assistant';
+            loadingBubble.textContent = '...';
+            container.appendChild(loadingBubble);
+            container.scrollTop = container.scrollHeight;
+
+            try {
+                const res = await fetch(`${API}/api/analysis/${currentRunDate}/chat`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message })
+                });
+                const data = await res.json();
+                loadingBubble.textContent = data.response || 'No response.';
+            } catch (e) {
+                loadingBubble.textContent = 'Error getting response.';
+            }
+
+            container.scrollTop = container.scrollHeight;
+            btn.disabled = false;
+            btn.textContent = 'Send';
+        }
+
+        loadLatestRun();
+        loadAnalysis();
+    </script>
+</body>
+</html>

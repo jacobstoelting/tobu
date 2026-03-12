@@ -65,6 +65,31 @@ def init_db():
                 recorded_at  TEXT
             )
         """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS analyses (
+                id              SERIAL PRIMARY KEY,
+                run_date        TEXT,
+                recommendation  TEXT,
+                created_at      TEXT
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id          SERIAL PRIMARY KEY,
+                run_date    TEXT,
+                role        TEXT,
+                content     TEXT,
+                created_at  TEXT
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS weekly_summaries (
+                id          SERIAL PRIMARY KEY,
+                week_start  TEXT UNIQUE,
+                summary     TEXT,
+                created_at  TEXT
+            )
+        """)
 
 
 def save_run(run_data: dict):
@@ -245,3 +270,64 @@ def delete_comparisons_for_run(date: str):
             (f"{date_key}%",)
         )
     compute_and_save_elo()
+
+
+def save_analysis(run_date: str, recommendation: str):
+    init_db()
+    with _db() as conn:
+        cur = _cursor(conn)
+        cur.execute("""
+            INSERT INTO analyses (run_date, recommendation, created_at)
+            VALUES (%s, %s, %s)
+        """, (run_date, recommendation, datetime.now().isoformat()))
+
+
+def get_latest_analysis():
+    init_db()
+    with _db() as conn:
+        cur = _cursor(conn)
+        cur.execute("SELECT * FROM analyses ORDER BY created_at DESC LIMIT 1")
+        row = cur.fetchone()
+    return dict(row) if row else None
+
+
+def save_chat_message(run_date: str, role: str, content: str):
+    init_db()
+    with _db() as conn:
+        cur = _cursor(conn)
+        cur.execute("""
+            INSERT INTO chat_messages (run_date, role, content, created_at)
+            VALUES (%s, %s, %s, %s)
+        """, (run_date, role, content, datetime.now().isoformat()))
+
+
+def get_chat_messages(run_date: str) -> list:
+    init_db()
+    with _db() as conn:
+        cur = _cursor(conn)
+        cur.execute(
+            "SELECT role, content FROM chat_messages WHERE run_date = %s ORDER BY created_at",
+            (run_date,)
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+
+def save_weekly_summary(week_start: str, summary: str):
+    init_db()
+    now = datetime.now().isoformat()
+    with _db() as conn:
+        cur = _cursor(conn)
+        cur.execute("""
+            INSERT INTO weekly_summaries (week_start, summary, created_at)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (week_start) DO UPDATE SET summary = %s, created_at = %s
+        """, (week_start, summary, now, summary, now))
+
+
+def get_weekly_summary(week_start: str):
+    init_db()
+    with _db() as conn:
+        cur = _cursor(conn)
+        cur.execute("SELECT * FROM weekly_summaries WHERE week_start = %s", (week_start,))
+        row = cur.fetchone()
+    return dict(row) if row else None

@@ -211,3 +211,40 @@ def get_recommendation(current_run, recent_runs, health, feel, notes, comparison
     )
 
     return message.content[0].text
+
+
+def get_weekly_summary(runs: list) -> str:
+    """Generate a brief weekly training summary."""
+    if not runs:
+        return "No runs this week yet."
+    recent_text = _fmt_recent(runs)
+    prompt = f"""Based on these runs from the past week, write a brief 2-3 sentence coaching summary of how training is going and what to focus on next week. Be direct and specific.
+
+{recent_text}"""
+    message = CLIENT.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=300,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    return message.content[0].text
+
+
+def chat_followup(run_date: str, analysis_text: str, history: list, user_message: str) -> str:
+    """Handle a follow-up chat message about a run."""
+    system = f"""You are Tobu, a personal AI running coach. The user ran on {run_date} and you analyzed their run. Here was your analysis:
+
+{analysis_text}
+
+Answer follow-up questions concisely and helpfully. Be specific and actionable."""
+
+    messages = [
+        *[{"role": m["role"], "content": m["content"]} for m in history],
+        {"role": "user", "content": user_message}
+    ]
+    response = CLIENT.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=500,
+        system=system,
+        messages=messages
+    )
+    return response.content[0].text

@@ -3,7 +3,7 @@ from rich.console import Console
 from rich.panel import Panel
 from garmin import get_health_snapshot
 from checkin import run_checkin
-from db import get_runs_last_n_days, get_run_elo_ranking
+from db import get_runs_last_n_days, get_run_elo_ranking, save_analysis
 from coach import get_recommendation
 from weather import get_run_weather, get_forecast
 
@@ -39,6 +39,7 @@ def main():
     # Step 3: Get Claude's recommendation
     with console.status("[dim]Generating your next run recommendation...[/dim]", spinner="dots"):
         recommendation = get_recommendation(current_run, recent_runs, health, feel, notes, comparisons, elo_ranking, weather, forecast)
+        save_analysis(today_date, recommendation)
 
     console.print()
     console.print(Panel(

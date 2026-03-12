@@ -7,6 +7,8 @@ returns JSON-serializable data. Wire these directly into your web
 framework routes (Flask, FastAPI, etc.).
 """
 
+from datetime import datetime, timedelta
+import coach
 from db import (
     get_runs_last_n_days,
     get_run_by_date,
@@ -17,6 +19,12 @@ from db import (
     delete_comparisons_for_run,
     compute_and_save_elo,
     get_run_elo_ranking,
+    save_analysis as save_analysis_db,
+    get_latest_analysis as get_latest_analysis_db,
+    save_chat_message as save_chat_message_db,
+    get_chat_messages as get_chat_messages_db,
+    save_weekly_summary as save_weekly_summary_db,
+    get_weekly_summary as get_weekly_summary_db,
 )
 
 
@@ -113,3 +121,64 @@ def _validate_comparisons(comparisons: list):
         if "other_date" not in c or "result" not in c:
             raise ValueError("Each comparison must have 'other_date' and 'result'")
         _validate_result(c["result"])
+
+
+def get_latest_analysis():
+    """
+    Returns the most recent Claude analysis.
+    Web route: GET /api/analysis/latest
+    """
+    return get_latest_analysis_db()
+
+
+def generate_analysis():
+    """
+    Generate a new analysis for the most recent run and save it.
+    Web route: POST /api/analysis/generate
+    """
+    runs = get_runs_last_n_days(30)
+    if not runs:
+        raise ValueError("No runs found")
+    current_run = runs[0]
+    run_date = current_run["date"][:10]
+    recent_runs = runs[1:]
+    comparisons = get_comparisons_for_run(run_date)
+    elo_ranking = get_run_elo_ranking(days=14)
+    feel = current_run.get("feel", "unknown")
+    notes = current_run.get("notes")
+    recommendation = coach.get_recommendation(
+        current_run, recent_runs, None, feel, notes,
+        comparisons, elo_ranking, None, None
+    )
+    save_analysis_db(run_date, recommendation)
+    return {"run_date": run_date, "recommendation": recommendation}
+
+
+def send_chat_message(run_date: str, message: str):
+    """
+    Send a follow-up chat message about a run.
+    Web route: POST /api/analysis/{date}/chat
+    """
+    analysis = get_latest_analysis_db()
+    analysis_text = analysis["recommendation"] if analysis else "No previous analysis available."
+    history = get_chat_messages_db(run_date)
+    save_chat_message_db(run_date, "user", message)
+    response = coach.chat_followup(run_date, analysis_text, history, message)
+    save_chat_message_db(run_date, "assistant", response)
+    return {"response": response}
+
+
+def get_or_generate_weekly_summary():
+    """
+    Returns this week's summary, generating it if needed.
+    Web route: GET /api/summary/weekly
+    """
+    today = datetime.now()
+    week_start = (today - timedelta(days=today.weekday())).strftime("%Y-%m-%d")
+    existing = get_weekly_summary_db(week_start)
+    if existing:
+        return existing
+    runs = get_runs_last_n_days(7)
+    summary = coach.get_weekly_summary(runs)
+    save_weekly_summary_db(week_start, summary)
+    return {"week_start": week_start, "summary": summary}
