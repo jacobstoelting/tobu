@@ -194,6 +194,7 @@ def sync_from_garmin(days=30):
     Returns: {"synced": int, "total": int}
     """
     from garmin import get_recent_runs as garmin_get_recent_runs
+    from db import save_weekly_summary as save_weekly_summary_db
     runs = garmin_get_recent_runs(days=days)
     new_count = 0
     for run in runs:
@@ -201,4 +202,8 @@ def sync_from_garmin(days=30):
         if not get_run_by_date(date_key):
             save_run(run)
             new_count += 1
+    if new_count > 0:
+        today = datetime.now()
+        week_start = (today - timedelta(days=today.weekday())).strftime("%Y-%m-%d")
+        save_weekly_summary_db(week_start, "No runs this week yet.")
     return {"synced": new_count, "total": len(runs)}
