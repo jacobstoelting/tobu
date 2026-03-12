@@ -12,6 +12,7 @@ import coach
 from db import (
     get_runs_last_n_days,
     get_run_by_date,
+    save_run,
     has_comparisons,
     get_comparisons_for_run,
     save_comparisons,
