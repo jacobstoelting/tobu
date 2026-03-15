@@ -154,7 +154,7 @@ def generate_analysis(ctx: UserContext):
     feel = current_run.get("feel", "unknown")
     notes = current_run.get("notes")
     recommendation = coach.get_recommendation(
-        current_run, recent_runs, None, feel, notes,
+        current_run, recent_runs, {}, feel, notes,
         comparisons, elo_ranking, None, None,
         api_key=ctx.anthropic_key,
     )
