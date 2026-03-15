@@ -10,16 +10,16 @@ FEET_PER_METER = 3.28084
 INCHES_PER_CM = 0.393701
 
 
-def get_client():
-    email = os.environ.get("GARMIN_EMAIL")
-    password = os.environ.get("GARMIN_PASSWORD")
+def get_client(email: str, password: str):
     client = Garmin(email, password)
     client.login()
     return client
 
 
-def get_last_run():
-    client = get_client()
+def get_last_run(email: str = None, password: str = None):
+    email = email or os.environ.get("GARMIN_EMAIL")
+    password = password or os.environ.get("GARMIN_PASSWORD")
+    client = get_client(email, password)
 
     activities = client.get_activities(0, 10)
     last_run = next(
@@ -85,8 +85,10 @@ def get_last_run():
     return run
 
 
-def get_recent_runs(days=14):
-    client = get_client()
+def get_recent_runs(days=14, email: str = None, password: str = None):
+    email = email or os.environ.get("GARMIN_EMAIL")
+    password = password or os.environ.get("GARMIN_PASSWORD")
+    client = get_client(email, password)
     cutoff = datetime.now() - timedelta(days=days)
 
     activities = client.get_activities(0, 20)
@@ -119,8 +121,10 @@ def get_recent_runs(days=14):
     return recent_runs
 
 
-def get_health_snapshot(for_date: str = None):
-    client = get_client()
+def get_health_snapshot(for_date: str = None, email: str = None, password: str = None):
+    email = email or os.environ.get("GARMIN_EMAIL")
+    password = password or os.environ.get("GARMIN_PASSWORD")
+    client = get_client(email, password)
     if for_date is None:
         for_date = date_type.today().isoformat()
 

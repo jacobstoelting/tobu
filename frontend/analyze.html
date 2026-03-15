@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Analyze — Tobu</title>
     <link rel="stylesheet" href="/style.css">
+    <script src="/auth.js"></script>
 </head>
 <body>
     <nav>
@@ -73,7 +74,7 @@
 
         async function loadLatestRun() {
             try {
-                const res = await fetch(`${API}/api/runs?days=30`);
+                const res = await fetch(`${API}/api/runs?days=30`, { headers: getHeaders() });
                 const runs = await res.json();
                 if (!runs || runs.length === 0) {
                     document.getElementById('run-title').textContent = 'No runs found';
@@ -107,7 +108,7 @@
 
         async function loadAnalysis() {
             try {
-                const res = await fetch(`${API}/api/analysis/latest`);
+                const res = await fetch(`${API}/api/analysis/latest`, { headers: getHeaders() });
                 const data = await res.json();
                 const el = document.getElementById('analysis-content');
                 if (!data || !data.recommendation) {
@@ -127,7 +128,7 @@
             btn.textContent = 'Analyzing...';
             el.innerHTML = '<p class="no-analysis">Generating analysis...</p>';
             try {
-                const res = await fetch(`${API}/api/analysis/generate`, { method: 'POST' });
+                const res = await fetch(`${API}/api/analysis/generate`, { method: 'POST', headers: getHeaders() });
                 const data = await res.json();
                 if (data.recommendation) {
                     el.innerHTML = `<p class="analysis-text">${data.recommendation}</p>`;
@@ -174,7 +175,7 @@
             try {
                 const res = await fetch(`${API}/api/analysis/${currentRunDate}/chat`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { ...getHeaders(), 'Content-Type': 'application/json' },
                     body: JSON.stringify({ message })
                 });
                 const data = await res.json();
@@ -188,6 +189,7 @@
             btn.textContent = 'Send';
         }
 
+        initAuth();
         loadLatestRun();
         loadAnalysis();
     </script>

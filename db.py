@@ -9,6 +9,7 @@ load_dotenv()
 
 ELO_K = 32
 ELO_DEFAULT = 1000
+_initialized = False
 
 
 @contextmanager
@@ -31,11 +32,18 @@ def _cursor(conn):
 
 
 def init_db():
+    global _initialized
+    if _initialized:
+        return
+    _initialized = True
+
     with _db() as conn:
         cur = _cursor(conn)
+
         cur.execute("""
             CREATE TABLE IF NOT EXISTS runs (
                 id                SERIAL PRIMARY KEY,
+                user_id           TEXT DEFAULT '',
                 date              TEXT,
                 distance_mi       REAL,
                 duration_min      REAL,
@@ -54,11 +62,9 @@ def init_db():
             )
         """)
         cur.execute("""
-            ALTER TABLE runs ADD COLUMN IF NOT EXISTS elo_score REAL DEFAULT 1000
-        """)
-        cur.execute("""
             CREATE TABLE IF NOT EXISTS run_comparisons (
                 id           SERIAL PRIMARY KEY,
+                user_id      TEXT DEFAULT '',
                 today_date   TEXT,
                 other_date   TEXT,
                 result       TEXT,
@@ -68,6 +74,7 @@ def init_db():
         cur.execute("""
             CREATE TABLE IF NOT EXISTS analyses (
                 id              SERIAL PRIMARY KEY,
+                user_id         TEXT DEFAULT '',
                 run_date        TEXT,
                 recommendation  TEXT,
                 created_at      TEXT
@@ -76,6 +83,7 @@ def init_db():
         cur.execute("""
             CREATE TABLE IF NOT EXISTS chat_messages (
                 id          SERIAL PRIMARY KEY,
+                user_id     TEXT DEFAULT '',
                 run_date    TEXT,
                 role        TEXT,
                 content     TEXT,
@@ -85,25 +93,55 @@ def init_db():
         cur.execute("""
             CREATE TABLE IF NOT EXISTS weekly_summaries (
                 id          SERIAL PRIMARY KEY,
-                week_start  TEXT UNIQUE,
+                user_id     TEXT DEFAULT '',
+                week_start  TEXT,
                 summary     TEXT,
                 created_at  TEXT
             )
         """)
 
+        # Column migrations for existing deployments
+        for table in ["runs", "run_comparisons", "analyses", "chat_messages", "weekly_summaries"]:
+            cur.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT ''")
+        cur.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS elo_score REAL DEFAULT 1000")
 
-def save_run(run_data: dict):
+        # Migrate weekly_summaries unique constraint from (week_start) to (week_start, user_id)
+        cur.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint
+                    WHERE conname = 'weekly_summaries_week_start_user_id_key'
+                ) THEN
+                    ALTER TABLE weekly_summaries
+                        DROP CONSTRAINT IF EXISTS weekly_summaries_week_start_key;
+                    ALTER TABLE weekly_summaries
+                        ADD CONSTRAINT weekly_summaries_week_start_user_id_key
+                        UNIQUE (week_start, user_id);
+                END IF;
+            END $$;
+        """)
+
+        # One-time data migration: claim existing unowned rows for the server owner
+        owner_email = os.environ.get("GARMIN_EMAIL", "")
+        if owner_email:
+            for table in ["runs", "run_comparisons", "analyses", "chat_messages", "weekly_summaries"]:
+                cur.execute(f"UPDATE {table} SET user_id = %s WHERE user_id = ''", (owner_email,))
+
+
+def save_run(run_data: dict, user_id: str):
     init_db()
     with _db() as conn:
         cur = _cursor(conn)
         cur.execute("""
             INSERT INTO runs (
-                date, distance_mi, duration_min, avg_pace,
+                user_id, date, distance_mi, duration_min, avg_pace,
                 avg_hr, max_hr, avg_cadence, elevation_gain_ft,
                 training_effect, training_load, vo2max,
                 feel, notes, recorded_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
+            user_id,
             run_data.get("date"),
             run_data.get("distance_mi"),
             run_data.get("duration_min"),
@@ -121,41 +159,42 @@ def save_run(run_data: dict):
         ))
 
 
-def get_runs_last_n_days(n=14):
+def get_runs_last_n_days(n=14, user_id: str = ""):
     init_db()
     cutoff = (datetime.now() - timedelta(days=n)).strftime("%Y-%m-%d %H:%M:%S")
     with _db() as conn:
         cur = _cursor(conn)
         cur.execute(
-            "SELECT * FROM runs WHERE date >= %s ORDER BY date DESC", (cutoff,)
+            "SELECT * FROM runs WHERE user_id = %s AND date >= %s ORDER BY date DESC",
+            (user_id, cutoff),
         )
         return [dict(r) for r in cur.fetchall()]
 
 
-def save_comparisons(today_date: str, comparisons: list):
+def save_comparisons(today_date: str, comparisons: list, user_id: str):
     init_db()
     now = datetime.now().isoformat()
     with _db() as conn:
         cur = _cursor(conn)
         cur.executemany("""
-            INSERT INTO run_comparisons (today_date, other_date, result, recorded_at)
-            VALUES (%s, %s, %s, %s)
-        """, [(today_date, c["other_date"], c["result"], now) for c in comparisons])
+            INSERT INTO run_comparisons (user_id, today_date, other_date, result, recorded_at)
+            VALUES (%s, %s, %s, %s, %s)
+        """, [(user_id, today_date, c["other_date"], c["result"], now) for c in comparisons])
 
 
-def compute_and_save_elo():
+def compute_and_save_elo(user_id: str):
     """Replay all stored comparisons to compute ELO scores for every run."""
     init_db()
     with _db() as conn:
         cur = _cursor(conn)
 
-        # Load all run dates and seed scores
-        cur.execute("SELECT date FROM runs")
+        cur.execute("SELECT date FROM runs WHERE user_id = %s", (user_id,))
         scores = {r["date"][:10]: ELO_DEFAULT for r in cur.fetchall()}
 
-        # Replay comparisons in chronological order
         cur.execute(
-            "SELECT today_date, other_date, result FROM run_comparisons ORDER BY recorded_at"
+            "SELECT today_date, other_date, result FROM run_comparisons "
+            "WHERE user_id = %s ORDER BY recorded_at",
+            (user_id,),
         )
         comps = cur.fetchall()
 
@@ -182,15 +221,14 @@ def compute_and_save_elo():
             scores[td] = r_today + ELO_K * (actual - expected_today)
             scores[od] = r_other + ELO_K * ((1 - actual) - (1 - expected_today))
 
-        # Write scores back
         for date_key, score in scores.items():
             cur.execute(
-                "UPDATE runs SET elo_score = %s WHERE date LIKE %s",
-                (round(score, 1), f"{date_key}%")
+                "UPDATE runs SET elo_score = %s WHERE user_id = %s AND date LIKE %s",
+                (round(score, 1), user_id, f"{date_key}%"),
             )
 
 
-def get_run_elo_ranking(days=14):
+def get_run_elo_ranking(days=14, user_id: str = ""):
     """Returns recent runs sorted by elo_score descending."""
     init_db()
     cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
@@ -198,40 +236,42 @@ def get_run_elo_ranking(days=14):
         cur = _cursor(conn)
         cur.execute(
             "SELECT date, distance_mi, avg_pace, elo_score FROM runs "
-            "WHERE date >= %s ORDER BY elo_score DESC",
-            (cutoff,)
+            "WHERE user_id = %s AND date >= %s ORDER BY elo_score DESC",
+            (user_id, cutoff),
         )
         return [dict(r) for r in cur.fetchall()]
 
 
-def get_run_by_date(date: str):
+def get_run_by_date(date: str, user_id: str = ""):
     """Returns the saved run for a given date, or None."""
     init_db()
     date_key = date[:10]
     with _db() as conn:
         cur = _cursor(conn)
         cur.execute(
-            "SELECT * FROM runs WHERE date LIKE %s ORDER BY recorded_at DESC LIMIT 1",
-            (f"{date_key}%",)
+            "SELECT * FROM runs WHERE user_id = %s AND date LIKE %s "
+            "ORDER BY recorded_at DESC LIMIT 1",
+            (user_id, f"{date_key}%"),
         )
         row = cur.fetchone()
     return dict(row) if row else None
 
 
-def has_comparisons(date: str) -> bool:
+def has_comparisons(date: str, user_id: str = "") -> bool:
     """Returns True if the run on this date has pairwise comparisons stored."""
     init_db()
     date_key = date[:10]
     with _db() as conn:
         cur = _cursor(conn)
         cur.execute(
-            "SELECT COUNT(*) AS count FROM run_comparisons WHERE today_date LIKE %s",
-            (f"{date_key}%",)
+            "SELECT COUNT(*) AS count FROM run_comparisons "
+            "WHERE user_id = %s AND today_date LIKE %s",
+            (user_id, f"{date_key}%"),
         )
         return cur.fetchone()["count"] > 0
 
 
-def get_comparisons_for_run(date: str) -> list:
+def get_comparisons_for_run(date: str, user_id: str = "") -> list:
     """Returns all pairwise comparisons for a given run date."""
     init_db()
     date_key = date[:10]
@@ -239,95 +279,102 @@ def get_comparisons_for_run(date: str) -> list:
         cur = _cursor(conn)
         cur.execute(
             "SELECT today_date, other_date, result FROM run_comparisons "
-            "WHERE today_date LIKE %s ORDER BY recorded_at",
-            (f"{date_key}%",)
+            "WHERE user_id = %s AND today_date LIKE %s ORDER BY recorded_at",
+            (user_id, f"{date_key}%"),
         )
         return [dict(r) for r in cur.fetchall()]
 
 
-def update_comparison(today_date: str, other_date: str, new_result: str):
+def update_comparison(today_date: str, other_date: str, new_result: str, user_id: str = ""):
     """Update a single pairwise comparison result and recompute ELO."""
     init_db()
     with _db() as conn:
         cur = _cursor(conn)
         cur.execute(
             "UPDATE run_comparisons SET result = %s, recorded_at = %s "
-            "WHERE today_date LIKE %s AND other_date LIKE %s",
-            (new_result, datetime.now().isoformat(),
-             f"{today_date[:10]}%", f"{other_date[:10]}%")
+            "WHERE user_id = %s AND today_date LIKE %s AND other_date LIKE %s",
+            (new_result, datetime.now().isoformat(), user_id,
+             f"{today_date[:10]}%", f"{other_date[:10]}%"),
         )
-    compute_and_save_elo()
+    compute_and_save_elo(user_id)
 
 
-def delete_comparisons_for_run(date: str):
+def delete_comparisons_for_run(date: str, user_id: str = ""):
     """Delete all comparisons for a run and recompute ELO."""
     init_db()
     date_key = date[:10]
     with _db() as conn:
         cur = _cursor(conn)
         cur.execute(
-            "DELETE FROM run_comparisons WHERE today_date LIKE %s",
-            (f"{date_key}%",)
+            "DELETE FROM run_comparisons WHERE user_id = %s AND today_date LIKE %s",
+            (user_id, f"{date_key}%"),
         )
-    compute_and_save_elo()
+    compute_and_save_elo(user_id)
 
 
-def save_analysis(run_date: str, recommendation: str):
+def save_analysis(run_date: str, recommendation: str, user_id: str = ""):
     init_db()
     with _db() as conn:
         cur = _cursor(conn)
         cur.execute("""
-            INSERT INTO analyses (run_date, recommendation, created_at)
-            VALUES (%s, %s, %s)
-        """, (run_date, recommendation, datetime.now().isoformat()))
-
-
-def get_latest_analysis():
-    init_db()
-    with _db() as conn:
-        cur = _cursor(conn)
-        cur.execute("SELECT * FROM analyses ORDER BY created_at DESC LIMIT 1")
-        row = cur.fetchone()
-    return dict(row) if row else None
-
-
-def save_chat_message(run_date: str, role: str, content: str):
-    init_db()
-    with _db() as conn:
-        cur = _cursor(conn)
-        cur.execute("""
-            INSERT INTO chat_messages (run_date, role, content, created_at)
+            INSERT INTO analyses (user_id, run_date, recommendation, created_at)
             VALUES (%s, %s, %s, %s)
-        """, (run_date, role, content, datetime.now().isoformat()))
+        """, (user_id, run_date, recommendation, datetime.now().isoformat()))
 
 
-def get_chat_messages(run_date: str) -> list:
+def get_latest_analysis(user_id: str = ""):
     init_db()
     with _db() as conn:
         cur = _cursor(conn)
         cur.execute(
-            "SELECT role, content FROM chat_messages WHERE run_date = %s ORDER BY created_at",
-            (run_date,)
+            "SELECT * FROM analyses WHERE user_id = %s ORDER BY created_at DESC LIMIT 1",
+            (user_id,),
+        )
+        row = cur.fetchone()
+    return dict(row) if row else None
+
+
+def save_chat_message(run_date: str, role: str, content: str, user_id: str = ""):
+    init_db()
+    with _db() as conn:
+        cur = _cursor(conn)
+        cur.execute("""
+            INSERT INTO chat_messages (user_id, run_date, role, content, created_at)
+            VALUES (%s, %s, %s, %s, %s)
+        """, (user_id, run_date, role, content, datetime.now().isoformat()))
+
+
+def get_chat_messages(run_date: str, user_id: str = "") -> list:
+    init_db()
+    with _db() as conn:
+        cur = _cursor(conn)
+        cur.execute(
+            "SELECT role, content FROM chat_messages "
+            "WHERE user_id = %s AND run_date = %s ORDER BY created_at",
+            (user_id, run_date),
         )
         return [dict(r) for r in cur.fetchall()]
 
 
-def save_weekly_summary(week_start: str, summary: str):
+def save_weekly_summary(week_start: str, summary: str, user_id: str = ""):
     init_db()
     now = datetime.now().isoformat()
     with _db() as conn:
         cur = _cursor(conn)
         cur.execute("""
-            INSERT INTO weekly_summaries (week_start, summary, created_at)
-            VALUES (%s, %s, %s)
-            ON CONFLICT (week_start) DO UPDATE SET summary = %s, created_at = %s
-        """, (week_start, summary, now, summary, now))
+            INSERT INTO weekly_summaries (user_id, week_start, summary, created_at)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (week_start, user_id) DO UPDATE SET summary = %s, created_at = %s
+        """, (user_id, week_start, summary, now, summary, now))
 
 
-def get_weekly_summary(week_start: str):
+def get_weekly_summary(week_start: str, user_id: str = ""):
     init_db()
     with _db() as conn:
         cur = _cursor(conn)
-        cur.execute("SELECT * FROM weekly_summaries WHERE week_start = %s", (week_start,))
+        cur.execute(
+            "SELECT * FROM weekly_summaries WHERE user_id = %s AND week_start = %s",
+            (user_id, week_start),
+        )
         row = cur.fetchone()
     return dict(row) if row else None

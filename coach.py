@@ -4,7 +4,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-CLIENT = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+def _client(api_key: str = None):
+    return anthropic.Anthropic(api_key=api_key or os.environ.get("ANTHROPIC_API_KEY"))
 
 SYSTEM_PROMPT = """You are Tobu, a personal AI running coach. Respond in exactly two sections using these headers:
 
@@ -200,10 +201,10 @@ What should my next run be?"""
     return prompt
 
 
-def get_recommendation(current_run, recent_runs, health, feel, notes, comparisons=None, elo_ranking=None, weather=None, forecast=None):
+def get_recommendation(current_run, recent_runs, health, feel, notes, comparisons=None, elo_ranking=None, weather=None, forecast=None, api_key: str = None):
     prompt = build_prompt(current_run, recent_runs, health, feel, notes, comparisons, elo_ranking, weather, forecast)
 
-    message = CLIENT.messages.create(
+    message = _client(api_key).messages.create(
         model="claude-sonnet-4-6",
         max_tokens=800,
         system=SYSTEM_PROMPT,
@@ -213,7 +214,7 @@ def get_recommendation(current_run, recent_runs, health, feel, notes, comparison
     return message.content[0].text
 
 
-def get_weekly_summary(runs: list) -> str:
+def get_weekly_summary(runs: list, api_key: str = None) -> str:
     """Generate a brief weekly training summary."""
     if not runs:
         return "No runs this week yet."
@@ -221,7 +222,7 @@ def get_weekly_summary(runs: list) -> str:
     prompt = f"""Based on {len(runs)} run(s) from the past week, write a brief 2-3 sentence coaching summary of how training is going and what to focus on next. Work with whatever data is available — even one run tells us something useful. Be direct and specific, no caveats about data quantity.
 
 {recent_text}"""
-    message = CLIENT.messages.create(
+    message = _client(api_key).messages.create(
         model="claude-sonnet-4-6",
         max_tokens=300,
         messages=[{"role": "user", "content": prompt}]
@@ -229,7 +230,7 @@ def get_weekly_summary(runs: list) -> str:
     return message.content[0].text
 
 
-def chat_followup(run_date: str, analysis_text: str, history: list, user_message: str) -> str:
+def chat_followup(run_date: str, analysis_text: str, history: list, user_message: str, api_key: str = None) -> str:
     """Handle a follow-up chat message about a run."""
     system = f"""You are Tobu, a personal AI running coach. The user ran on {run_date} and you analyzed their run. Here was your analysis:
 
@@ -241,7 +242,7 @@ Answer follow-up questions concisely and helpfully. Be specific and actionable."
         *[{"role": m["role"], "content": m["content"]} for m in history],
         {"role": "user", "content": user_message}
     ]
-    response = CLIENT.messages.create(
+    response = _client(api_key).messages.create(
         model="claude-sonnet-4-6",
         max_tokens=500,
         system=system,

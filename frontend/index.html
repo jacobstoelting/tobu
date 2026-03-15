@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Tobu</title>
     <link rel="stylesheet" href="/style.css">
+    <script src="/auth.js"></script>
 </head>
 <body>
     <nav>
@@ -112,7 +113,7 @@
 
         async function loadRuns() {
             try {
-                const res = await fetch(`${API}/api/runs?days=30`);
+                const res = await fetch(`${API}/api/runs?days=30`, { headers: getHeaders() });
                 const runs = await res.json();
                 const grid = document.getElementById('runs-grid');
                 grid.innerHTML = '';
@@ -129,7 +130,7 @@
 
         async function loadWeeklySummary() {
             try {
-                const res = await fetch(`${API}/api/summary/weekly`);
+                const res = await fetch(`${API}/api/summary/weekly`, { headers: getHeaders() });
                 const data = await res.json();
                 document.getElementById('weekly-summary').textContent = data.summary || 'No summary available.';
             } catch (e) {
@@ -142,7 +143,7 @@
             btn.disabled = true;
             btn.textContent = 'Syncing...';
             try {
-                const res = await fetch(`${API}/api/sync`, { method: 'POST' });
+                const res = await fetch(`${API}/api/sync`, { method: 'POST', headers: getHeaders() });
                 const data = await res.json();
                 btn.textContent = `✓ ${data.synced} new`;
                 await loadRuns();
@@ -156,6 +157,7 @@
             }, 3000);
         }
 
+        initAuth();
         loadRuns();
         loadWeeklySummary();
     </script>
