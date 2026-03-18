@@ -11,8 +11,23 @@ INCHES_PER_CM = 0.393701
 
 
 def get_client(email: str, password: str):
+    from db import get_garmin_tokens, save_garmin_tokens
+
+    cached = get_garmin_tokens(email)
+    if cached:
+        try:
+            client = Garmin(email, password)
+            client.login(tokenstore=cached)
+            return client
+        except Exception:
+            pass
+
     client = Garmin(email, password)
     client.login()
+    try:
+        save_garmin_tokens(email, client.garth.dumps())
+    except Exception:
+        pass
     return client
 
 

@@ -99,6 +99,13 @@ def init_db():
                 created_at  TEXT
             )
         """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS garmin_tokens (
+                user_id     TEXT PRIMARY KEY,
+                tokens      TEXT,
+                updated_at  TEXT
+            )
+        """)
 
         # Column migrations for existing deployments
         for table in ["runs", "run_comparisons", "analyses", "chat_messages", "weekly_summaries"]:
@@ -378,3 +385,23 @@ def get_weekly_summary(week_start: str, user_id: str = ""):
         )
         row = cur.fetchone()
     return dict(row) if row else None
+
+
+def save_garmin_tokens(user_id: str, tokens: str):
+    init_db()
+    with _db() as conn:
+        cur = _cursor(conn)
+        cur.execute("""
+            INSERT INTO garmin_tokens (user_id, tokens, updated_at)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (user_id) DO UPDATE SET tokens = %s, updated_at = %s
+        """, (user_id, tokens, datetime.now().isoformat(), tokens, datetime.now().isoformat()))
+
+
+def get_garmin_tokens(user_id: str):
+    init_db()
+    with _db() as conn:
+        cur = _cursor(conn)
+        cur.execute("SELECT tokens FROM garmin_tokens WHERE user_id = %s", (user_id,))
+        row = cur.fetchone()
+    return row["tokens"] if row else None
