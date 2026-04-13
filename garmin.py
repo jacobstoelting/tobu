@@ -1,6 +1,7 @@
 import os
+import logging
 from datetime import datetime, timedelta, date as date_type
-from garminconnect import Garmin
+from garminconnect import Garmin, GarminConnectTooManyRequestsError, GarminConnectConnectionError
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -11,23 +12,25 @@ INCHES_PER_CM = 0.393701
 
 
 def get_client(email: str, password: str):
-    from db import get_garmin_tokens, save_garmin_tokens
+    from db import get_garmin_tokens, save_garmin_tokens, clear_garmin_tokens
 
-    cached = get_garmin_tokens(email)
+    cached = get_garmin_tokens(email.lower())
     if cached:
         try:
             client = Garmin(email, password)
             client.login(tokenstore=cached)
             return client
+        except (GarminConnectTooManyRequestsError, GarminConnectConnectionError):
+            raise
         except Exception:
-            pass
+            clear_garmin_tokens(email.lower())
 
     client = Garmin(email, password)
     client.login()
     try:
-        save_garmin_tokens(email, client.garth.dumps())
+        save_garmin_tokens(email.lower(), client.garth.dumps())
     except Exception:
-        pass
+        logging.exception("Failed to cache Garmin tokens for %s — next sync will require a full login", email)
     return client
 
 

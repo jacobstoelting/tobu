@@ -405,3 +405,10 @@ def get_garmin_tokens(user_id: str):
         cur.execute("SELECT tokens FROM garmin_tokens WHERE user_id = %s", (user_id,))
         row = cur.fetchone()
     return row["tokens"] if row else None
+
+
+def clear_garmin_tokens(user_id: str):
+    init_db()
+    with _db() as conn:
+        cur = _cursor(conn)
+        cur.execute("DELETE FROM garmin_tokens WHERE user_id = %s", (user_id,))

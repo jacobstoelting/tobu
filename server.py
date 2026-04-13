@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, Depends, Header
+from garminconnect import GarminConnectConnectionError, GarminConnectTooManyRequestsError
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -107,7 +108,10 @@ def health():
 
 @app.post("/api/sync")
 def sync_garmin(days: int = 30, ctx: UserContext = Depends(get_user_context)):
-    return web_api.sync_from_garmin(ctx, days=days)
+    try:
+        return web_api.sync_from_garmin(ctx, days=days)
+    except (GarminConnectTooManyRequestsError, GarminConnectConnectionError):
+        raise HTTPException(status_code=429, detail="Garmin is rate-limiting login attempts. Please try again later.")
 
 
 @app.get("/api/analysis/latest")
